@@ -123,7 +123,7 @@ func DefaultConfig() (*Config, error) {
 		}
 	}
 
-	tldrCachePath := filepath.Join(dirname, ".tldr/cache/pages/linux")
+	tldrCachePath := filepath.Join(dirname, ".tldr/cache/pages")
 	return &Config{
 		CheatSheetsDir: cheatSheetDir,
 		TldrPath:       "tldr",
@@ -139,8 +139,18 @@ type Config struct {
 	EditorPath     string
 }
 
+func NewTldr(cmdPath, cachePath string) *Tldr {
+	return &Tldr{
+		CmdPath:   cmdPath,
+		CachePath: cachePath,
+		pages:     []string{"common", "linux"},
+	}
+}
+
 type Tldr struct {
-	CmdPath string
+	CmdPath   string
+	CachePath string
+	pages     []string
 }
 
 func (t *Tldr) run(args ...string) error {
@@ -176,6 +186,26 @@ func (t *Tldr) Update() error {
 	return t.run("--update")
 }
 
+func (t *Tldr) FindFileInCache(filename string) (string, error) {
+	var dirs []string
+	for _, page := range t.pages {
+		dirs = append(dirs, filepath.Join(t.CachePath, page))
+	}
+
+	for _, dir := range dirs {
+		hasFound, err := FindFileInDir(filename, dir)
+		if err != nil {
+			return "", err
+		}
+
+		if hasFound {
+			return dir, nil
+		}
+	}
+
+	return "", nil
+}
+
 func (t *Tldr) Version() (string, error) {
 	cmd := exec.Command(t.CmdPath, "--version")
 	output, err := cmd.Output()
@@ -189,7 +219,7 @@ func (t *Tldr) Version() (string, error) {
 func NewExecutor(cfg *Config) *Executor {
 	return &Executor{
 		cfg:  cfg,
-		tldr: &Tldr{cfg.TldrPath},
+		tldr: NewTldr(cfg.TldrPath, cfg.TldrCachePath),
 	}
 }
 
@@ -272,13 +302,17 @@ func (e *Executor) Edit(cmd *Command) error {
 		return e.editLocalCheatSheet(cmd)
 	}
 
-	hasFound, err = FindFileInDir(cmd.Filename(), e.cfg.TldrCachePath)
+	dirname, err := e.tldr.FindFileInCache(cmd.Filename())
 	if err != nil {
 		return err
 	}
 
-	if hasFound {
-		src := filepath.Join(e.cfg.TldrCachePath, cmd.Filename())
+	if cmd.PrintLog() {
+		log.Printf("find cheat sheet stored in '%v' of tldr cache\n", dirname)
+	}
+
+	if dirname != "" {
+		src := filepath.Join(dirname, cmd.Filename())
 		dest := filepath.Join(e.cfg.CheatSheetsDir, cmd.Filename())
 		if err := CopyFile(src, dest); err != nil {
 			return err
