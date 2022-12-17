@@ -5,7 +5,7 @@ This command line tool is a simple wrapper of `tldr` that add additional functio
 It stores personal cheat-sheet at `$HOME/.cheat-sheet` directory. And Every time
 when you find a cheat-sheet, it will first look at your personal cheat-sheets in the `$HOME/.cheat-sheet` directory. If it can't find it, it will then call `tldr` to find it.
 
-# Install
+## Install
 
 ```bash
 go install github.com/yz-1209/cheat-sheet-tool@latest
