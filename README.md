@@ -15,13 +15,13 @@ go install github.com/yz-1209/cheat-sheet-tool@latest
 
 Usage is quite like `tldr`:
 ```bash
-# To list help info
+# List help info
 cs -h
 
-# To list openssl cheat-sheet
+# Print openssl cheat-sheet
 cs openssl
 
-# To edit openssl cheat-sheet
+# Edit openssl cheat-sheet
 cs -e openssl
 
 ```
