@@ -24,13 +24,20 @@ func main() {
 	fs.Bool(UpdateFlag, false, "update tldr cache")
 	fs.String(EditFlag, "", "edit cheat-sheet name")
 
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		fmt.Printf("error ocurred: %v\n", err)
+	var err error
+	if len(os.Args) < 2 {
+		fs.Set(HelpFlag, "true")
+	} else {
+		err = fs.Parse(os.Args[1:])
+	}
+
+	if err != nil {
+		fmt.Printf("parse os args failed: %v", err)
 		return
 	}
 
 	if err := Run(fs); err != nil {
-		fmt.Printf("error ocurred: %v\n", err)
+		fmt.Printf("run command failed: %v\n", err)
 	}
 }
 
