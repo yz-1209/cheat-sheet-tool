@@ -1,7 +1,6 @@
 package main
 
 import (
-	"embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,22 +10,24 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	_ "embed"
 )
 
-//go:embed version
-var embedFs embed.FS
+//go:embed version.txt
+var version string
 
-type CmdType int
+type CmdKind int
 
 const (
-	CmdHelp CmdType = iota
+	CmdHelp CmdKind = iota
 	CmdVersion
 	CmdFind
 	CmdEdit
 	CmdUpdate
 )
 
-func (c CmdType) String() string {
+func (c CmdKind) String() string {
 	return []string{"help", "version", "find", "edit", "update"}[c]
 }
 
@@ -57,17 +58,18 @@ func CreateCommand(fs *flag.FlagSet) *Command {
 
 	editFlag := fs.Lookup(EditFlag)
 	if val := editFlag.Value.String(); val != "" {
-		return NewCommand(CmdEdit, WithArg(val), withLog())
+		args := append([]string{val}, fs.Args()...)
+		return NewCommand(CmdEdit, WithArgs(args), withLog())
 	}
 
-	return NewCommand(CmdFind, WithArg(fs.Args()[0]), withLog())
+	return NewCommand(CmdFind, WithArgs(fs.Args()), withLog())
 }
 
 type CmdOption func(*Command)
 
-func WithArg(arg string) CmdOption {
+func WithArgs(args []string) CmdOption {
 	return func(c *Command) {
-		c.Arg = arg
+		c.Args = args
 	}
 }
 
@@ -77,9 +79,9 @@ func WithFlag(name, val string) CmdOption {
 	}
 }
 
-func NewCommand(type_ CmdType, options ...CmdOption) *Command {
+func NewCommand(kind CmdKind, options ...CmdOption) *Command {
 	cmd := &Command{
-		Cmd:   type_,
+		Cmd:   kind,
 		Flags: make(map[string]string),
 	}
 
@@ -91,8 +93,8 @@ func NewCommand(type_ CmdType, options ...CmdOption) *Command {
 }
 
 type Command struct {
-	Cmd   CmdType
-	Arg   string
+	Cmd   CmdKind
+	Args  []string
 	Flags map[string]string
 }
 
@@ -102,7 +104,7 @@ func (c *Command) PrintLog() bool {
 }
 
 func (c *Command) Filename() string {
-	return c.Arg + ".md"
+	return strings.Join(c.Args, "-") + ".md"
 }
 
 func DefaultConfig() (*Config, error) {
@@ -128,6 +130,7 @@ func DefaultConfig() (*Config, error) {
 		CheatSheetsDir: cheatSheetDir,
 		TldrPath:       "tldr",
 		TldrCachePath:  tldrCachePath,
+		TldrPages:      []string{"common", "linux"},
 		EditorPath:     "vim",
 	}, nil
 }
@@ -136,14 +139,15 @@ type Config struct {
 	CheatSheetsDir string
 	TldrPath       string
 	TldrCachePath  string
+	TldrPages      []string
 	EditorPath     string
 }
 
-func NewTldr(cmdPath, cachePath string) *Tldr {
+func NewTldr(cmdPath, cachePath string, pages []string) *Tldr {
 	return &Tldr{
 		CmdPath:   cmdPath,
 		CachePath: cachePath,
-		pages:     []string{"common", "linux"},
+		pages:     pages,
 	}
 }
 
@@ -173,8 +177,8 @@ func (t *Tldr) run(args ...string) error {
 	return nil
 }
 
-func (t *Tldr) Find(name string) error {
-	return t.run(name)
+func (t *Tldr) Find(args ...string) error {
+	return t.run(args...)
 }
 
 func (t *Tldr) Render(path string) error {
@@ -193,12 +197,12 @@ func (t *Tldr) FindFileInCache(filename string) (string, error) {
 	}
 
 	for _, dir := range dirs {
-		hasFound, err := FindFileInDir(filename, dir)
+		ok, err := IsFileExists(dir, filename)
 		if err != nil {
 			return "", err
 		}
 
-		if hasFound {
+		if ok {
 			return dir, nil
 		}
 	}
@@ -219,7 +223,7 @@ func (t *Tldr) Version() (string, error) {
 func NewExecutor(cfg *Config) *Executor {
 	return &Executor{
 		cfg:  cfg,
-		tldr: NewTldr(cfg.TldrPath, cfg.TldrCachePath),
+		tldr: NewTldr(cfg.TldrPath, cfg.TldrCachePath, cfg.TldrPages),
 	}
 }
 
@@ -264,41 +268,35 @@ func (e *Executor) PrintVersion() error {
 		return err
 	}
 
-	csVersion, err := embedFs.ReadFile("version")
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("cheat-sheet:\t%v\n", string(csVersion))
+	fmt.Printf("cheat-sheet:\t%v\n", version)
 	fmt.Printf("tldr:\t%v\n", tldrVersion)
 	return nil
 }
 
 func (e *Executor) Find(cmd *Command) error {
-	hasFound, err := FindFileInDir(cmd.Filename(), e.cfg.CheatSheetsDir)
+	ok, err := IsFileExists(e.cfg.CheatSheetsDir, cmd.Filename())
 	if err != nil {
 		return err
 	}
 
 	if cmd.PrintLog() {
-		log.Printf("has found local cheat-sheet: %v\n", hasFound)
+		log.Printf("has found local cheat-sheet: %v\n", ok)
 	}
 
-	if hasFound {
-		path := filepath.Join(e.cfg.CheatSheetsDir, cmd.Filename())
-		return e.tldr.Render(path)
+	if ok {
+		return e.tldr.Render(filepath.Join(e.cfg.CheatSheetsDir, cmd.Filename()))
 	}
 
-	return e.tldr.Find(cmd.Arg)
+	return e.tldr.Find(cmd.Args...)
 }
 
 func (e *Executor) Edit(cmd *Command) error {
-	hasFound, err := FindFileInDir(cmd.Filename(), e.cfg.CheatSheetsDir)
+	ok, err := IsFileExists(e.cfg.CheatSheetsDir, cmd.Filename())
 	if err != nil {
 		return err
 	}
 
-	if hasFound {
+	if ok {
 		return e.editLocalCheatSheet(cmd)
 	}
 
@@ -329,35 +327,24 @@ func (e *Executor) editLocalCheatSheet(cmd *Command) error {
 	editCmd.Stdout = os.Stdout
 	editCmd.Stderr = os.Stderr
 
-	if err := editCmd.Run(); err != nil {
-		return err
-	}
-
-	return e.Find(cmd)
+	return editCmd.Run()
 }
 
 func (e *Executor) Update(cmd *Command) error {
 	return e.tldr.Update()
 }
 
-func FindFileInDir(filename, dirname string) (bool, error) {
-	dir, err := os.Open(dirname)
-	if err != nil {
-		return false, err
+func IsFileExists(dirname, filename string) (bool, error) {
+	_, err := os.Stat(filepath.Join(dirname, filename))
+	if err == nil {
+		return true, nil
 	}
 
-	filenames, err := dir.Readdirnames(-1)
-	if err != nil {
-		return false, err
+	if os.IsNotExist(err) {
+		return false, nil
 	}
 
-	for _, name := range filenames {
-		if name == filename {
-			return true, nil
-		}
-	}
-
-	return false, nil
+	return false, err
 }
 
 func CopyFile(src, dest string) error {
